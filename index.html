@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="UTF-8">
+  <title>ESP32 步进电机控制界面</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    body {
+      font-family: sans-serif;
+      padding: 20px;
+    }
+    .control-row {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      margin-bottom: 5px;
+    }
+    .control-row input {
+      	width: 50px; /* 调整输入框宽度 */
+		margin: 5px; /* 设置输入框间距 */
+		font-size: 10px; /* 调整字体大小 */
+    }
+    #log {
+      height: 600px;
+      overflow-y: auto;
+      border: 1px solid #ccc;
+      padding: 10px;
+      background-color: #f7f7f7;
+      white-space: pre-wrap;
+      font-family: monospace;
+    }
+    .button-group {
+      margin-top: 15px;
+    }
+
+  </style>
+</head>
+<body>
+
+  <h2>ESP32 步进电机控制</h2>
+
+  <div class="control-row">
+    <label>仰角角度:</label>
+    <input type="number" id="jdInput" placeholder="度数">
+    <button onclick="sendCommand('JDMOVE')">发送仰角</button>
+
+    <label>方位角度:</label>
+    <input type="number" id="fwInput" placeholder="度数">
+    <button onclick="sendCommand('FWMOVE')">发送方位</button>
+  </div>
+<h3>仰角JD修正系数（小时6~17）</h3>
+<form method="POST" action="/update_factors">
+  <div class="control-row">
+    {% for i in range(12) %}
+      <input type="number" name="jd_{{ i }}" step="0.0001" value="{{ jd_factors[i] }}">
+    {% endfor %}
+  </div>
+  <h3>方位FW修正系数（小时6~17）</h3>
+  <div class="control-row">
+    {% for i in range(12) %}
+      <input type="number" name="fw_{{ i }}" step="0.0001" value="{{ fw_factors[i] }}">
+    {% endfor %}
+  </div>
+  <button type="submit">提交修正参数</button>
+</form>
+
+
+  <div class="button-group">
+    <button onclick="sendCommand('START_AUTO')">启动自动</button>
+    <button onclick="sendCommand('STOPTO')">暂停自动</button>
+	<div class="control-row">
+	  <label>调整幅度:</label>
+	  <input type="number" id="stepInput" min="0" step="0.01" value="0.1" />
+	  <button onclick="adjustDirection('UP')">向上</button>
+	  <button onclick="adjustDirection('DOWN')">向下</button>
+	  <button onclick="adjustDirection('LEFT')">向左</button>
+	  <button onclick="adjustDirection('RIGHT')">向右</button>
+	</div>
+  </div>
+  
+
+
+  <h3>ESP32 返回信息：</h3>
+  <div id="log"></div>
+
+  <script>
+    const logDiv = document.getElementById('log');
+    const maxLines = 35;
+
+    function appendLog(message) {
+      const lines = logDiv.innerText.split('\n');
+      if (lines.length >= maxLines) {
+        lines.shift();
+      }
+
+      // 在接收到的消息前添加时间戳
+      lines.push(`${message}`);
+      logDiv.innerText = lines.join('\n');
+      logDiv.scrollTop = logDiv.scrollHeight;
+    }
+	function adjustDirection(direction) {
+	  const step = parseFloat(document.getElementById("stepInput").value);
+	  if (isNaN(step) || step <= 0) {
+		appendLog("请填写有效的正数幅度值！");
+		return;
+	  }
+
+	  fetch('/adjust', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ direction, step })
+	  })
+		.then(response => response.text())
+		.then(data => appendLog(`发送调整指令: ${direction} 幅度 ${step}`))
+		.catch(error => appendLog("调整指令失败: " + error));
+	}
+
+
+
+    function sendCommand(type) {
+      let value = '';
+      if (type === 'JDMOVE') {
+        value = document.getElementById('jdInput').value;
+      } else if (type === 'FWMOVE') {
+        value = document.getElementById('fwInput').value;
+      }
+
+      fetch('/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type, value })
+      })
+      .then(response => response.text())
+      .then(data => {
+        appendLog('已发送: ' + type + (value !== '' ? ` ${value}` : ''));
+      })
+      .catch(error => {
+        appendLog('发送失败: ' + error);
+      });
+    }
+
+    // 轮询获取ESP32反馈信息
+    setInterval(() => {
+      fetch('/recv')
+        .then(response => response.json())
+        .then(data => {
+          if (data && data.lines && data.lines.length > 0) {
+            data.lines.forEach(line => {
+              appendLog(line);
+            });
+          }
+        });
+    }, 1000); // 每秒请求一次
+  </script>
+
+</body>
+</html>
